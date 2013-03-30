@@ -1,0 +1,81 @@
+Pod linuxem:
+
+Instalacja Sourcery G++ Lite:
+-----------------------------
+
+- na kobo sprawdzamy czy wersja kompilatora Sourcery to (Sourcery G++ Lite 2010q1-202):
+
+  strings /lib/libc.so.6 | grep ourcery
+
+- pobieramy (Sourcery G++ Lite 2010q1-202):
+
+  wget https://sourcery.mentor.com/public/gnu_toolchain/arm-none-linux-gnueabi/arm-2010q1-202-arm-none-linux-gnueabi.bin
+  wget https://sourcery.mentor.com/sgpp/lite/arm/portal/doc7606/getting-started.pdf (optional)
+
+- instalator/deinstalator Sourcery (nie dotyczy to samego Sourcery) jest niekompatybilny z dashem (domyślny w Ubuntu)
+  zamień go na sh (na pytanie odpowiedz "no"):
+
+  sudo dpkg-reconfigure -plow dash
+
+- zainstaluj biblioteki potrzebne przez instalator
+
+  sudo apt-get install gettext autoconf libglib2.0-dev ia32-libs
+
+- uruchom instalator:
+
+  chmod a+x arm-2010q1-202-arm-none-linux-gnueabi.bin
+  ./arm-2010q1-202-arm-none-linux-gnueabi.bin
+
+- zainstaluj z domyślnymi opcjami
+
+- dodaj ścieżkę do aplikacji na końcu pliku ~/.bashrc
+
+  export PATH="/home/<yourusername>/CodeSourcery/Sourcery_G++_Lite/bin:${PATH}"
+
+- przywróć shell dash (na pytanie odpowiedz "yes"):
+
+  sudo dpkg-reconfigure -plow dash
+
+- zrestartuj terminal i sprawdź wersję gcc:
+
+  arm-none-linux-gnueabi-g++ -v
+
+Kompilacja jądra:
+-----------------
+
+- rozpakować jądro (dla imx507)
+
+- zrobić kopię pliku .config
+
+- konfiguracja:
+
+  a) dla zaimportowania opcji z podmienionego pliku .config
+
+  make CROSS_COMPILE=arm-none-linux-gnueabi- ARCH=arm oldconfig
+
+  b) dla recznego ustawienia opcji
+
+  make CROSS_COMPILE=arm-none-linux-gnueabi- ARCH=arm menuconfig
+
+- kompilacja
+
+  make CROSS_COMPILE=arm-none-linux-gnueabi- ARCH=arm uImage
+  make CROSS_COMPILE=arm-none-linux-gnueabi- ARCH=arm modules
+  make CROSS_COMPILE=arm-none-linux-gnueabi- ARCH=arm INSTALL_MOD_PATH=$HOME/kobo/modules modules_install
+
+- jeśli uImage się nie stworzył, doinstalować u-boot-tools:
+
+  sudo apt-get install u-boot-tools
+
+Podmiana jądra:
+---------------
+
+- upewnić się, że uImage nie ma więcej niż 2MB
+
+- przegrać uImage do partycji użytkownika (FAT32)
+
+- wykonać:
+
+  dd if=/mnt/onboard/uImage of=/dev/mmcblk0 bs=512 seek=2048
+  sync
+
