@@ -1,0 +1,10 @@
+kernel/crypto/tcrypt.ko:
+kernel/drivers/char/imx_sim.ko:
+kernel/drivers/scsi/scsi_wait_scan.ko:
+kernel/drivers/usb/storage/usb-storage.ko:
+kernel/drivers/mmc/card/sdio_wifi_pwr.ko:
+kernel/drivers/staging/ath6kl/ath6kl.ko:
+kernel/drivers/usb/gadget/arcotg_udc.ko:
+kernel/drivers/usb/gadget/g_ether.ko: kernel/drivers/usb/gadget/arcotg_udc.ko
+kernel/drivers/usb/gadget/g_file_storage.ko: kernel/drivers/usb/gadget/arcotg_udc.ko
+kernel/lib/crc-ccitt.ko:

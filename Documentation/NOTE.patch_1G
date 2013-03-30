@@ -1,0 +1,21 @@
+2012/06/07 William Chen
+
+based on patches/1G/1104_1_mx50_1GHz_kernel_20120507.patch
+
+1. Modified	arch/arm/mach-mx5/mx50_freq.c
+		arch/arm/mach-mx5/mx50_ddr_freq.S
+       		arch/arm/mach-mx5/mx50_rdp_pmic_mc13892.c
+      	 	arch/arm/mach-mx5/mx50_rdp.c
+		arch/arm/mach-mx5/bus_freq.c
+       		arch/arm/mach-mx5/mx50_suspend.S
+       		arch/arm/mach-mx5/clock_mx50.c
+       		arch/arm/plat-mxc/cpufreq.c
+       		arch/arm/plat-mxc/clock.c
+       		drivers/regulator/reg-mc13892.c
+2. Skipped(*)	arch/arm/mach-mx5/mx50_arm2.c
+		arch/arm/mach-mx5/mx50_arm2.c
+		arch/arm/mach-mx5/mx50_arm2.c
+		arch/arm/mach-mx5/serial.h
+		drivers/regulator/reg-mc34708.c
+
+
