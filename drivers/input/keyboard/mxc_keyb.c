@@ -636,11 +636,13 @@ static int mxc_kpp_scan_matrix(void)
 						input_event(mxckbd_dev, EV_KEY,
 							    mxckpd_keycodes
 							    [scancode], 1);
+						input_sync(mxckbd_dev);
 						if (mxckpd_keycodes[scancode] ==
 						    KEY_LEFTSHIFT) {
 							input_event(mxckbd_dev,
 								    EV_KEY,
 								    KEY_3, 1);
+							input_sync(mxckbd_dev);
 						}
 						kpp_dev.iKeyState = KStateDown;
 						press_scancode[row][col] = -1;
@@ -678,11 +680,13 @@ static int mxc_kpp_scan_matrix(void)
 						input_event(mxckbd_dev, EV_KEY,
 							    mxckpd_keycodes
 							    [scancode], 0);
+						input_sync(mxckbd_dev);
 						if (mxckpd_keycodes[scancode] ==
 						    KEY_LEFTSHIFT) {
 							input_event(mxckbd_dev,
 								    EV_KEY,
 								    KEY_3, 0);
+							input_sync(mxckbd_dev);
 						}
 						kpp_dev.iKeyState = KStateUp;
 						release_scancode[row][col] = -1;
@@ -1159,6 +1163,7 @@ void mxc_kpp_report_key(int isDown,__u16 wKeyCode)
 {
 	if (mxckbd_dev) {
 		input_event(mxckbd_dev, EV_KEY, wKeyCode, isDown);
+		input_sync(mxckbd_dev);
 	}
 }
 
@@ -1254,10 +1259,12 @@ static int  mxc_kpp_ioctl(struct inode *inode, struct file *filp, unsigned int c
 	{
 		case MXC_KPP_COMMAND_KEY_DOWN:
 			input_event(mxckbd_dev, EV_KEY,(unsigned short)arg, 1);
+			input_sync(mxckbd_dev);
 			printk("mxc_kpp_ioctl : key down [%d]\n", arg);
 			break;
 		case MXC_KPP_COMMAND_KEY_UP:
 			input_event(mxckbd_dev, EV_KEY,(unsigned short)arg, 0);
+			input_sync(mxckbd_dev);
 			printk("mxc_kpp_ioctl : key up [%d]\n", arg);
 			break;
 		default:

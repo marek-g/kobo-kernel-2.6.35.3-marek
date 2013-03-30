@@ -56,6 +56,8 @@
 
 #include <linux/time.h>
 #include <linux/bitops.h>
+#include <linux/sort.h>
+#include <linux/crc16.h>
 
 #include "epdc_regs.h"
 #include "lk_tps65185.h"
@@ -94,6 +96,9 @@
 
 static unsigned long default_bpp = 16;
 static int giEPDC_MAX_NUM_UPDATES=2;
+
+static int *_line_ranges; // temporary buffer for calculating which line ranges needs to be updated
+static u16 *_blocksCRC16; // CRC16 checksum of every 16x8 pixel block
 
 struct update_marker_data {
 	struct list_head full_list;
@@ -3091,27 +3096,109 @@ static int mxc_epdc_fb_ioctl(struct fb_info *info, unsigned int cmd,
 	return ret;
 }
 
+
+// calculates CRC16 of 16x8 pixel block
+static u16 calcBlockCRC16(struct mxc_epdc_fb_data *fb_data, u16 x, u16 y)
+{
+	int bpp = fb_data->epdc_fb_var.bits_per_pixel / 8;
+	int src_stride = fb_data->epdc_fb_var.xres_virtual * bpp;
+	unsigned char *src_ptr;
+	u16 res;
+
+	src_ptr = fb_data->info.screen_base + fb_data->fb_offset + y * src_stride + x * bpp;
+
+	res = crc16(0, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp); src_ptr += src_stride;
+	res = crc16(res, src_ptr, 16 * bpp);
+
+	return res;
+}
+
 static void mxc_epdc_fb_update_pages(struct mxc_epdc_fb_data *fb_data,
 				     u16 y1, u16 y2)
 {
 	struct mxcfb_update_data update;
+	int x, y, first_x;
+	u16 crc;
+	u16 *crcFB;
+	bool change;
+
 	GALLEN_DBGLOCAL_BEGIN();
 
-	/* Do partial screen update, Update full horizontal lines */
+	/* Do partial screen update */
 	update.update_region.left = 0;
 	update.update_region.width = fb_data->epdc_fb_var.xres;
 	update.update_region.top = y1;
-	update.update_region.height = y2 - y1;
+	update.update_region.height = y2 - y1 + 1;
 	update.waveform_mode = WAVEFORM_MODE_AUTO;
-	update.update_mode = UPDATE_MODE_FULL;
+	update.update_mode = UPDATE_MODE_PARTIAL;
 	update.update_marker = 0;
 	update.temp = TEMP_USE_AMBIENT;
 	update.flags = 0;
 
-	mxc_epdc_fb_send_update(&update, &fb_data->info);
-	
+	first_x = -1;
+	for (x = 0; x < fb_data->epdc_fb_var.xres; x += 16)
+	{
+		change = false;
+		for (y = y1; y < y2; y += 8)
+		{
+			crc = calcBlockCRC16(fb_data, x, y);
+			crcFB = &_blocksCRC16[(y/8) * (fb_data->native_width/16) + x/16];
+
+			if (*crcFB != crc)
+			{
+				*crcFB = crc;
+				change = true;
+			}
+		}
+
+		if (change)
+		{
+			if (first_x < 0) first_x = x;
+		}
+		else
+		{
+			// flush previous blocks
+			if (first_x >= 0)
+			{
+				update.update_region.left = first_x;
+				update.update_region.width = x - first_x;
+				mxc_epdc_fb_send_update(&update, &fb_data->info);
+
+				first_x = -1;
+			}
+		}
+	}
+
+	// flush last blocks
+	if (first_x >= 0)
+	{
+		update.update_region.left = first_x;
+		update.update_region.width = fb_data->epdc_fb_var.xres - first_x;
+		mxc_epdc_fb_send_update(&update, &fb_data->info);
+	}
+
 	GALLEN_DBGLOCAL_END();
 }
+
+// compare two line ranges (y1/y2)
+static int line_ranges_cmp(const void *a, const void *b)
+{
+	const int *ia = (const int*)a;
+	const int *ib = (const int*)b;
+
+	// increasing y1
+	if (ia[0] != ib[0]) return ia[0] - ib[0];
+
+	// but decreasing y2
+	return ib[1] - ia[1];
+}
+
 
 /* this is called back from the deferred io workqueue */
 static void mxc_epdc_fb_deferred_io(struct fb_info *info,
@@ -3120,28 +3207,94 @@ static void mxc_epdc_fb_deferred_io(struct fb_info *info,
 	struct mxc_epdc_fb_data *fb_data = (struct mxc_epdc_fb_data *)info;
 	struct page *page;
 	unsigned long beg, end;
-	int y1, y2, miny, maxy;
+	int i, y1, y2, last_y1, last_y2;
+	int no_ranges;
 
 	if (fb_data->auto_mode != AUTO_UPDATE_MODE_AUTOMATIC_MODE)
 		return;
 
-	miny = INT_MAX;
-	maxy = 0;
-	list_for_each_entry(page, pagelist, lru) {
+	// collect y1/y2 ranges to update
+	no_ranges = 0;
+	last_y1 = -1; last_y2 = -1;
+	list_for_each_entry(page, pagelist, lru)
+	{
 		beg = page->index << PAGE_SHIFT;
 		end = beg + PAGE_SIZE - 1;
 		y1 = beg / info->fix.line_length;
 		y2 = end / info->fix.line_length;
+
+		// align lines to 8
+		y1 &= ~0x7;
+		if (((y2 + 1) & 0x7) != 0)
+		{
+			y2++; y2 &= ~0x7; y2 += 7;
+		}
+
 		if (y2 >= fb_data->epdc_fb_var.yres)
+		{
 			y2 = fb_data->epdc_fb_var.yres - 1;
-		if (miny > y1)
-			miny = y1;
-		if (maxy < y2)
-			maxy = y2;
+		}
+
+		if (y1 != last_y1 || y2 != last_y2)
+		{
+			if (no_ranges > fb_data->native_height)
+			{
+				// too many ranges (temp array size is too short)
+				// update whole screen
+				mxc_epdc_fb_update_pages(fb_data, 0, fb_data->epdc_fb_var.yres - 1);
+				return;
+			}
+			else
+			{
+				_line_ranges[no_ranges*2 + 0] = last_y1 = y1;
+				_line_ranges[no_ranges*2 + 1] = last_y2 = y2;
+				no_ranges++;
+			}
+		}
 	}
 
-	mxc_epdc_fb_update_pages(fb_data, miny, maxy);
+	// sort y1/y2 ranges - increasing y1 but decresing y2
+	if (no_ranges > 1)
+	{
+		sort(_line_ranges, no_ranges, sizeof(int)*2, line_ranges_cmp, NULL);
+	}
+
+	// merge & update ranges
+	for (i = 0; i < no_ranges; i++)
+	{
+		y1 = _line_ranges[i*2 + 0];
+		y2 = _line_ranges[i*2 + 1];
+
+		if (i == 0)
+		{
+			last_y1 = y1;
+			last_y2 = y2;
+		}
+
+		if (y1 > last_y2 + 1)
+		{
+			// flush previous range
+			mxc_epdc_fb_update_pages(fb_data, last_y1, last_y2);
+
+			last_y1 = y1;
+			last_y2 = y2;
+		}
+		else
+		{
+			if (y2 > last_y2)
+			{
+				last_y2 = y2;
+			}
+		}
+	}
+
+	// flush last range
+	if (no_ranges > 0)
+	{
+		mxc_epdc_fb_update_pages(fb_data, last_y1, last_y2);
+	}
 }
+
 
 void mxc_epdc_fb_flush_updates(struct mxc_epdc_fb_data *fb_data)
 {
@@ -3322,7 +3475,7 @@ static struct fb_ops mxc_epdc_fb_ops = {
 };
 
 static struct fb_deferred_io mxc_epdc_fb_defio = {
-	.delay = HZ,
+	.delay = HZ / 10,
 	.deferred_io = mxc_epdc_fb_deferred_io,
 };
 
@@ -4534,6 +4687,19 @@ int __devinit mxc_epdc_fb_probe(struct platform_device *pdev)
 	info->fbdefio = &mxc_epdc_fb_defio;
 #ifdef CONFIG_FB_MXC_EINK_AUTO_UPDATE_MODE
 	GALLEN_DBGLOCAL_RUNLOG(45);
+
+	// allocate memory for update algorithms
+	_line_ranges = kmalloc(sizeof(int)*2*fb_data->native_height, GFP_KERNEL);
+	if (!_line_ranges)
+	{
+		dev_err(&pdev->dev, "cannot allocate memory for _line_ranges array\n");
+	}
+	_blocksCRC16 = kzalloc(sizeof(u16)*(fb_data->native_width/16)*(fb_data->native_height/8), GFP_KERNEL);
+	if (!_line_ranges)
+	{
+		dev_err(&pdev->dev, "cannot allocate memory for _blocksCRC16 array\n");
+	}
+
 	fb_deferred_io_init(info);
 #endif
 
@@ -4806,6 +4972,13 @@ static int mxc_epdc_fb_remove(struct platform_device *pdev)
 #ifdef CONFIG_FB_MXC_EINK_AUTO_UPDATE_MODE
 	GALLEN_DBGLOCAL_RUNLOG(3);
 	fb_deferred_io_cleanup(&fb_data->info);
+
+	// free memory for update algorithms
+	if (_line_ranges)
+	{
+		kfree(_line_ranges); _line_ranges = 0;
+		kfree(_blocksCRC16); _blocksCRC16 = 0;
+	}
 #endif
 
 	dma_free_writecombine(&pdev->dev, fb_data->map_size, fb_data->info.screen_base,
