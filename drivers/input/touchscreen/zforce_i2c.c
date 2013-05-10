@@ -27,20 +27,20 @@ static const char ZFORCE_TS_NAME[]	= "zForce-ir-touch";
 #define DEFAULT_PANEL_W		600
 #define DEFAULT_PANEL_H		800
 //#define ZFORCE_TS_WIDTH			600
-//#define ZFORCE_TS_HIGHT			800
+//#define ZFORCE_TS_HEIGHT			800
 
 //#define ZFORCE_TS_X_MAX 		ZFORCE_TS_WIDTH<<1
-//#define ZFORCE_TS_Y_MAX 		ZFORCE_TS_HIGHT<<1
+//#define ZFORCE_TS_Y_MAX 		ZFORCE_TS_HEIGHT<<1
 #define IDX_QUEUE_SIZE		20
 #define IDX_PACKET_SIZE		129
 
 static struct workqueue_struct *zForce_wq;
-static uint16_t g_touch_pressed, g_touch_triggered;
+static uint16_t g_touch_pressed[16], g_touch_triggered;
 static int g_zforce_initial_step;
 
 
 static unsigned long ZFORCE_TS_WIDTH=DEFAULT_PANEL_W;
-static unsigned long ZFORCE_TS_HIGHT=DEFAULT_PANEL_H;
+static unsigned long ZFORCE_TS_HEIGHT=DEFAULT_PANEL_H;
 static unsigned long ZFORCE_TS_X_MAX=DEFAULT_PANEL_W<<1; 
 static unsigned long ZFORCE_TS_Y_MAX=DEFAULT_PANEL_H<<1; 
 
@@ -53,6 +53,7 @@ static struct zForce_data {
 } zForce_ir_touch_data;
 
 static uint8_t cmd_Resolution_v2[] = {0xEE, 0x05, 0x02, (DEFAULT_PANEL_W&0xFF), (DEFAULT_PANEL_W>>8), (DEFAULT_PANEL_H&0xFF), (DEFAULT_PANEL_H>>8)};
+static const uint8_t cmd_EnableDualTouch_v2[] = {0xEE, 0x05, 0x03, 0x01, 0x00, 0x00, 0x00};
 static const uint8_t cmd_TouchData_v2[] = {0xEE, 0x01, 0x04};
 static const uint8_t cmd_Frequency_v2[] = {0xEE, 0x07, 0x08, 10, 00, 100, 00, 100, 00};
 static const uint8_t cmd_getFirmwareVer_v2[] = {0xEE, 0x01, 0x1E};
@@ -60,6 +61,7 @@ static const uint8_t cmd_Active_v2[] = {0xEE, 0x01, 0x01};
 static const uint8_t cmd_Deactive_v2[] = {0xEE, 0x01, 0x00};
 
 static uint8_t cmd_Resolution[] = {0x02, (DEFAULT_PANEL_W&0xFF), (DEFAULT_PANEL_W>>8), (DEFAULT_PANEL_H&0xFF), (DEFAULT_PANEL_H>>8)};
+static uint8_t cmd_EnableDualTouch[] = {0x03, 0x01, 0x00, 0x00, 0x00};
 static const uint8_t cmd_TouchData[] = {0x04};
 static const uint8_t cmd_Frequency[] = {0x08,10,100};
 static const uint8_t cmd_getFirmwareVer[] = {0x0A};
@@ -75,33 +77,12 @@ static int zForce_ir_touch_detect_int_level(void)
 	return v;
 }
 
-static int __zForce_read_data (struct i2c_client *client, char* buffer)
-{
-	uint8_t buf_recv[2];
-	int rc;
-		
-	while (zForce_ir_touch_detect_int_level())
-		schedule_timeout(2);
-	rc = i2c_master_recv(client, buf_recv, 2);
-	if (0xEE != buf_recv[0]) {
-		printk (KERN_ERR "[%s-%d] Error , frame start not found !!\n",__func__,__LINE__);
-		return 0;
-	}
-	
-	while (zForce_ir_touch_detect_int_level())
-		schedule_timeout(2);
-	return i2c_master_recv(client, buffer, buf_recv[1]);
-}
-
 /*	__zForce_ir_touch_init -- hand shaking with touch panel
  *
  *	1.recv hello packet
  */
 static int __zForce_ir_touch_init(struct i2c_client *client)
 {
-	uint8_t buf_recv[10] = { 0 };
-	uint8_t buf[10];
-
 	if(!zForce_ir_touch_detect_int_level()){
 		g_touch_triggered = 1;
 		schedule_delayed_work(&zForce_ir_touch_data.work, 0);
@@ -121,7 +102,6 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 {
 	uint8_t buf_recv[2]={0,};
 	int result = 0;
-	char *pBuffer;
 
 	if (buf == NULL)
 		return -EINVAL;
@@ -153,22 +133,30 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 		case 2:
 			printk ("[%s-%d] command Resolution (%d) ...\n",__func__,__LINE__,buf[1]);
 			if(8==gptHWCFG->m_val.bTouchCtrl) {    //neonode v2
-				i2c_master_send(client, cmd_Frequency_v2, sizeof(cmd_Frequency_v2));
+				i2c_master_send(client, cmd_EnableDualTouch_v2, sizeof(cmd_EnableDualTouch_v2));
 			}else{
-				i2c_master_send(client, cmd_Frequency, sizeof(cmd_Frequency));
+				i2c_master_send(client, cmd_EnableDualTouch, sizeof(cmd_EnableDualTouch));
 			}	
 			g_zforce_initial_step = 2;
 			break;
 		case 3:
-			printk ("[%s-%d] command Configuration ...\n",__func__,__LINE__);
+			printk ("[%s-%d] command Configuration (%d) ...\n",__func__,__LINE__,buf[1]);
+			if(8==gptHWCFG->m_val.bTouchCtrl) {    //neonode v2
+				i2c_master_send(client, cmd_Frequency_v2, sizeof(cmd_Frequency_v2));
+			}else{
+				i2c_master_send(client, cmd_Frequency, sizeof(cmd_Frequency));
+			}
+			g_zforce_initial_step = 3;
 			break;
 		case 4:
-//			printk ("[%s-%d] command Touch Data (count %d)...\n",__func__,__LINE__,buf[1]);
-//			printk ("[%02X %02X %02X %02X %02X %02X %02X]\n",buf[2],buf[3],buf[4],buf[5],buf[6],buf[7],buf[8]);
+			//printk ("[%s-%d] command Touch Data (count %d, bytes %d)...\n",__func__,__LINE__,buf[1],buf_recv[1]);
+			//printk ("[%02X %02X %02X %02X %02X %02X %02X %02X %02X]\n",buf[2],buf[3],buf[4],buf[5],buf[6],buf[7],buf[8],buf[9],buf[10]);
+			//if (buf[1] >= 2)
+			//	printk ("[%02X %02X %02X %02X %02X %02X %02X %02X %02X]\n",buf[11],buf[12],buf[13],buf[14],buf[15],buf[16],buf[17],buf[18],buf[19]);
 			if(8==gptHWCFG->m_val.bTouchCtrl) {    //neonode v2
-				memmove (buf, &buf[2], 9*buf[1]);
+				memmove (buf, &buf[1], 1 + 9*buf[1]);
 			}else{
-				memmove (buf, &buf[2], 7*buf[1]);
+				memmove (buf, &buf[1], 1 + 7*buf[1]);
 			}
 			result = 1;
 			break;
@@ -206,6 +194,13 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 					break;
 				case 2:
 					if(8==gptHWCFG->m_val.bTouchCtrl) {    //neonode v2
+						i2c_master_send(client, cmd_EnableDualTouch_v2, sizeof(cmd_EnableDualTouch_v2));
+					}else{
+						i2c_master_send(client, cmd_EnableDualTouch, sizeof(cmd_EnableDualTouch));
+					}
+					break;
+				case 3:
+					if(8==gptHWCFG->m_val.bTouchCtrl) {    //neonode v2
 						i2c_master_send(client, cmd_Frequency_v2, sizeof(cmd_Frequency_v2));
 					}else{
 						i2c_master_send(client, cmd_Frequency, sizeof(cmd_Frequency));
@@ -230,52 +225,88 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 extern int gIsCustomerUi;
 static void zForce_ir_touch_report_data(struct i2c_client *client, uint8_t *buf)
 {
-	static uint16_t last_x, last_y;
-	static int	pressure = 100;
-	uint16_t x1, x2, y1, y2;
-	int state;
-	if(8==gptHWCFG->m_val.bTouchCtrl) {
-		state = buf[4] & 0x03;
-	}else{
-		state = (buf[4] >> 6) & 0x03;
+	static uint16_t x[16], y[16], last_x, last_y;
+	static int pressure = 100;
+
+	int count = buf[0];
+	int n;
+	int fingers_down = 0;
+
+	// process events
+	for (n = 0; n < count; n++) {
+		int state; // 0 - down, 1 - move, 2 - up, 3 - clear
+		int id;
+
+		if (8==gptHWCFG->m_val.bTouchCtrl) {
+			state = buf[1 + 9*n + 4] & 0x03;
+			id = ((buf[1 + 9*n + 4] >> 2) & 0x0F) - 1;
+
+			x[id] = buf[1 + 9*n + 0] | (buf[1 + 9*n + 1] << 8);
+			y[id] = buf[1 + 9*n + 2] | (buf[1 + 9*n + 3] << 8);
+		} else {
+			state = (buf[1 + 7*n + 4] >> 6) & 0x03;
+			id = ((buf[1 + 7*n + 4] >> 2) & 0x0F) - 1;
+
+			x[id] = buf[1 + 7*n + 0] | (buf[1 + 7*n + 1] << 8);
+			y[id] = buf[1 + 7*n + 2] | (buf[1 + 7*n + 3] << 8);
+		}
+
+		if (gIsCustomerUi) {
+			uint16_t tmp;
+			x[id] = ZFORCE_TS_WIDTH-x[id]-1;
+			tmp = x[id]; x[id] = y[id]; y[id] = tmp;
+		}
+
+		if (2 == state) {
+			// touch up
+			g_touch_pressed[id] = 0;
+		}
+		else {
+			// touch down or touch move
+			g_touch_pressed[id] = 1;
+
+			if (id == 0) {
+				last_x = x[id];
+				last_y = y[id];
+			}
+		}
 	}
-	
-	if (2 == state) {
+
+	// send multitouch events
+	for (n = 0; n < 16; n++) {
+		if (g_touch_pressed[n]) {
+			fingers_down++;
+			input_report_abs(zForce_ir_touch_data.input, ABS_MT_TRACKING_ID, n);
+			input_report_abs(zForce_ir_touch_data.input, ABS_MT_POSITION_X, x[n]);
+			input_report_abs(zForce_ir_touch_data.input, ABS_MT_POSITION_Y, y[n]);
+			input_mt_sync(zForce_ir_touch_data.input);
+		}
+	}
+
+	if (fingers_down == 0) {
+		input_mt_sync(zForce_ir_touch_data.input);
+	}
+
+	// singletouch events
+	if (!g_touch_pressed[0]) {
+		// touch up
 		input_report_abs(zForce_ir_touch_data.input, ABS_X, last_x);
 		input_report_abs(zForce_ir_touch_data.input, ABS_Y, last_y);
 		input_report_abs(zForce_ir_touch_data.input, ABS_PRESSURE, 0);	// Joseph 20101023
-		input_report_key(zForce_ir_touch_data.input, BTN_TOUCH, 0);
-		g_touch_pressed = 0;
-//		printk ("[%s-%d] touch up (%d, %d) (%02X, %02X, %02X)\n",__func__,__LINE__, last_x, last_y,buf[4], buf[5], buf[6]);
-	} 
-	else {
-		pressure ^= 1;  
-		if (gIsCustomerUi) 
-		{
-			x1 = buf[0] | (buf[1] << 8);
-			y1 = buf[2] | (buf[3] << 8);
-			x1 = ZFORCE_TS_WIDTH-x1-1;
-			input_report_abs(zForce_ir_touch_data.input, ABS_Y, x1);
-			input_report_abs(zForce_ir_touch_data.input, ABS_X, y1);
-			input_report_abs(zForce_ir_touch_data.input, ABS_PRESSURE, pressure);
-			last_y = x1;
-			last_x = y1;
-//			printk ("[%s-%d] touch down (%d, %d, %d)\n",__func__,__LINE__,x1,y1, pressure);
-		}
-		else {
-			y1 = buf[0] | (buf[1] << 8);
-			x1 = buf[2] | (buf[3] << 8);
-//			printk ("[%s-%d] touch down (%d, %d) (p=%d, %d, %d, %d, %d)\n",__func__,__LINE__,y1,x1,buf[4],buf[5],buf[6],buf[7],buf[8]);
-			input_report_abs(zForce_ir_touch_data.input, ABS_X, x1);
-			input_report_abs(zForce_ir_touch_data.input, ABS_Y, y1);
-			input_report_abs(zForce_ir_touch_data.input, ABS_PRESSURE, 1024);
-			input_report_key(zForce_ir_touch_data.input, BTN_TOUCH, 1);
-			last_x = x1;
-			last_y = y1;
-		}
-		input_report_key(zForce_ir_touch_data.input, BTN_TOUCH, 1);
-		g_touch_pressed++;
 	}
+	else {
+		// touch down or touch move
+		pressure ^= 1;
+
+		input_report_abs(zForce_ir_touch_data.input, ABS_X, last_x);
+		input_report_abs(zForce_ir_touch_data.input, ABS_Y, last_y);
+		input_report_abs(zForce_ir_touch_data.input, ABS_PRESSURE, gIsCustomerUi ? pressure : 1024);
+	}
+
+	// buttons (single & multitouch)
+	input_report_key(zForce_ir_touch_data.input, BTN_TOUCH, fingers_down >= 1);
+	input_report_key(zForce_ir_touch_data.input, BTN_TOOL_DOUBLETAP, fingers_down >= 2);
+
 	input_sync(zForce_ir_touch_data.input);
 	schedule();	// Joseph 20101023
 }
@@ -374,8 +405,8 @@ static int zForce_ir_touch_suspend(struct platform_device *pdev, pm_message_t st
 //	printk ("[%s-%d] %s() %d\n",__FILE__,__LINE__,__func__,gSleep_Mode_Suspend);
 
 	/* return immediatly if the driver is still handling touch data */
-	if (g_touch_pressed || g_touch_triggered) {
-		printk("[%s-%d] zForce still handling touch data\n");
+	if (g_touch_pressed[0] || g_touch_pressed[1] || g_touch_triggered) {
+		printk("[%s-%d] zForce still handling touch data\n",__func__,__LINE__);
 		return -EBUSY;
 	}
 
@@ -445,6 +476,7 @@ static void zforce_i2c_close(struct input_dev *dev)
 static int zForce_ir_touch_probe(
 	struct i2c_client *client, const struct i2c_device_id *id)
 {
+	int i = 0;
 	int err = 0;
 
 	zForce_ir_touch_data.client = client;
@@ -478,63 +510,81 @@ static int zForce_ir_touch_probe(
 	zForce_ir_touch_data.input->open = zforce_i2c_open;
 	zForce_ir_touch_data.input->close = zforce_i2c_close;
 
-	input_set_drvdata(zForce_ir_touch_data.input, client);
-	
-	set_bit(EV_SYN, zForce_ir_touch_data.input->evbit);
-	
-	set_bit(EV_KEY, zForce_ir_touch_data.input->evbit);
-	set_bit(BTN_TOUCH, zForce_ir_touch_data.input->keybit);
-	set_bit(BTN_2, zForce_ir_touch_data.input->keybit);
-	
-	set_bit(EV_ABS, zForce_ir_touch_data.input->evbit);
-	set_bit(ABS_X, zForce_ir_touch_data.input->absbit);
-	set_bit(ABS_Y, zForce_ir_touch_data.input->absbit);
-	set_bit(ABS_PRESSURE, zForce_ir_touch_data.input->absbit);
-	set_bit(ABS_HAT0X, zForce_ir_touch_data.input->absbit);
-	set_bit(ABS_HAT0Y, zForce_ir_touch_data.input->absbit);
-
-    input_set_abs_params(zForce_ir_touch_data.input, ABS_X, 0, ZFORCE_TS_X_MAX, 0, 0);
-	input_set_abs_params(zForce_ir_touch_data.input, ABS_Y, 0, ZFORCE_TS_Y_MAX, 0, 0);
-	input_set_abs_params(zForce_ir_touch_data.input, ABS_PRESSURE, 0, 2048, 0, 0);
-	input_set_abs_params(zForce_ir_touch_data.input, ABS_HAT0X, 0, ZFORCE_TS_X_MAX, 0, 0);
-	input_set_abs_params(zForce_ir_touch_data.input, ABS_HAT0Y, 0, ZFORCE_TS_Y_MAX, 0, 0);
-
 	{
 		if(1==gptHWCFG->m_val.bDisplayResolution) {
 			// 1024x758 .
 			ZFORCE_TS_WIDTH=758;
-			ZFORCE_TS_HIGHT=1024;
+			ZFORCE_TS_HEIGHT=1024;
 		}
 		else if(2==gptHWCFG->m_val.bDisplayResolution) {
 			// 1024x768
 			ZFORCE_TS_WIDTH=768;
-			ZFORCE_TS_HIGHT=1024;
+			ZFORCE_TS_HEIGHT=1024;
 		}
 		else {
 			// 800x600 
 			ZFORCE_TS_WIDTH=600;
-			ZFORCE_TS_HIGHT=800;
+			ZFORCE_TS_HEIGHT=800;
 		}
 
 		ZFORCE_TS_X_MAX=ZFORCE_TS_WIDTH<<1;
-		ZFORCE_TS_Y_MAX=ZFORCE_TS_HIGHT<<1;
+		ZFORCE_TS_Y_MAX=ZFORCE_TS_HEIGHT<<1;
 
 		cmd_Resolution[1] = (uint8_t)(ZFORCE_TS_WIDTH&0xff);
 		cmd_Resolution[2] = (uint8_t)(ZFORCE_TS_WIDTH>>8);
-		cmd_Resolution[3] = (uint8_t)(ZFORCE_TS_HIGHT&0xff);
-		cmd_Resolution[4] = (uint8_t)(ZFORCE_TS_HIGHT>>8);
+		cmd_Resolution[3] = (uint8_t)(ZFORCE_TS_HEIGHT&0xff);
+		cmd_Resolution[4] = (uint8_t)(ZFORCE_TS_HEIGHT>>8);
 
 		cmd_Resolution_v2[3] = (uint8_t)(ZFORCE_TS_WIDTH&0xff);
 		cmd_Resolution_v2[4] = (uint8_t)(ZFORCE_TS_WIDTH>>8);
-		cmd_Resolution_v2[5] = (uint8_t)(ZFORCE_TS_HIGHT&0xff);
-		cmd_Resolution_v2[6] = (uint8_t)(ZFORCE_TS_HIGHT>>8);
+		cmd_Resolution_v2[5] = (uint8_t)(ZFORCE_TS_HEIGHT&0xff);
+		cmd_Resolution_v2[6] = (uint8_t)(ZFORCE_TS_HEIGHT>>8);
 	}
+
+	input_set_drvdata(zForce_ir_touch_data.input, client);
+
+	set_bit(EV_SYN, zForce_ir_touch_data.input->evbit);
+
+	set_bit(EV_KEY, zForce_ir_touch_data.input->evbit);
+	set_bit(BTN_TOUCH, zForce_ir_touch_data.input->keybit);
+	//set_bit(BTN_2, zForce_ir_touch_data.input->keybit);
+	//set_bit(BTN_TOOL_FINGER, zForce_ir_touch_data.input->keybit);
+	set_bit(BTN_TOOL_DOUBLETAP, zForce_ir_touch_data.input->keybit);
+	//set_bit(BTN_TOOL_TRIPLETAP, zForce_ir_touch_data.input->keybit);
+
+	set_bit(EV_ABS, zForce_ir_touch_data.input->evbit);
+	set_bit(ABS_X, zForce_ir_touch_data.input->absbit);
+	set_bit(ABS_Y, zForce_ir_touch_data.input->absbit);
+	set_bit(ABS_PRESSURE, zForce_ir_touch_data.input->absbit);
+	//set_bit(ABS_HAT0X, zForce_ir_touch_data.input->absbit);
+	//set_bit(ABS_HAT0Y, zForce_ir_touch_data.input->absbit);
+
+	set_bit(ABS_MT_POSITION_X, zForce_ir_touch_data.input->absbit);
+	set_bit(ABS_MT_POSITION_Y, zForce_ir_touch_data.input->absbit);
+
+	//input_mt_create_slots(zForce_ir_touch_data.input, 2);
+    input_set_abs_params(zForce_ir_touch_data.input, ABS_X, 0, ZFORCE_TS_HEIGHT - 1, 0, 0);
+	input_set_abs_params(zForce_ir_touch_data.input, ABS_Y, 0, ZFORCE_TS_WIDTH - 1, 0, 0);
+	input_set_abs_params(zForce_ir_touch_data.input, ABS_PRESSURE, 0, 2048, 0, 0);
+	//input_set_abs_params(zForce_ir_touch_data.input, ABS_HAT0X, 0, ZFORCE_TS_X_MAX, 0, 0);
+	//input_set_abs_params(zForce_ir_touch_data.input, ABS_HAT0Y, 0, ZFORCE_TS_Y_MAX, 0, 0);
+	//input_set_abs_params(zForce_ir_touch_data.input, ABS_MT_SLOT, 0, 1, 0, 0);
+	input_set_abs_params(zForce_ir_touch_data.input, ABS_MT_POSITION_X, 0, ZFORCE_TS_HEIGHT - 1, 0, 0);
+	input_set_abs_params(zForce_ir_touch_data.input, ABS_MT_POSITION_Y, 0, ZFORCE_TS_WIDTH - 1, 0, 0);
+	input_set_abs_params(zForce_ir_touch_data.input, ABS_MT_TRACKING_ID, 0, 15, 0, 0);
 
 	err = input_register_device(zForce_ir_touch_data.input);
 	if (err < 0) {
 		pr_debug("Register device file!\n");
 		goto fail;
 	}
+
+	// Make sure we clear the MT_SLOT state
+	for(i = 0; i < 16; i++) {
+		//input_report_abs(zForce_ir_touch_data.input, ABS_MT_SLOT, i);
+		g_touch_pressed[i] = 0;
+	}
+	input_report_abs(zForce_ir_touch_data.input, ABS_MT_TRACKING_ID, -1);
 
 	err = device_create_file(&client->dev, &dev_attr_neocmd);
 	if (err) {
@@ -557,6 +607,7 @@ static int zForce_ir_touch_remove(struct i2c_client *client)
 	if (zForce_wq)
 		destroy_workqueue(zForce_wq);
 
+	//input_mt_destroy_slots(zForce_ir_touch_data.input);
 	input_unregister_device(zForce_ir_touch_data.input);
 
 	free_irq(client->irq, ZFORCE_TS_NAME);

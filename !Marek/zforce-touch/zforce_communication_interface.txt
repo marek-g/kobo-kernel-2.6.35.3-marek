@@ -1,0 +1,469 @@
+zForce_Communication_Interface_3_053 点评
+
+zForceTM
+
+Communication Interface
+
+Hardware and Software Interface for the TM zForceTouch Screen v3.0
+
+Contents
+
+Purpose ............................................................................................................................................................................. 2
+
+Hardware Interface Communication Control Signals ....................................................................................................... 3
+
+Signal description .......................................................................................................................................................... 3
+
+Bootloader Interface ..................................................................................................................................................... 3
+
+Inter-Integrated Circuit (I2C) Communication ................................................................................................................... 4
+
+I2C General description ................................................................................................................................................. 4
+
+I2C Serial data ................................................................................................................................................................ 4
+
+I2C reading sequence..................................................................................................................................................... 5
+
+I2C Addressing modes ................................................................................................................................................... 6
+
+I2C Address ................................................................................................................................................................... 6
+
+8-bit Addresses.......................................................................................................................................................... 6
+
+zForceTM
+
+Protocol Stack .................................................................................................................................................... 7
+
+Embedded code ............................................................................................................................................................ 7
+
+zForceTM
+
+communication interface ............................................................................................................................... 7
+
+Communication data format......................................................................................................................................... 7
+
+Version definition .......................................................................................................................................................... 8
+
+Sending commands to zForceTM
+
+.................................................................................................................................... 9
+
+Receiving commands from zForceTM
+
+........................................................................................................................... 11
+
+Initialization ................................................................................................................................................................. 11
+
+How to receive and extract the ReceiveData ............................................................................................................. 11
+
+Extract data from the DATA payload .......................................................................................................................... 11
+
+Touch Detection .............................................................................................................................................................. 14
+
+Device Driver Guidelines ................................................................................................................................................. 14
+
+Sending data ............................................................................................................................................................... 14
+
+Receiving data ............................................................................................................................................................. 15
+
+The precise data structure can be found in the previous chapter “Receiving commands from zForceTM”. .............. 15
+
+Example Sending/Receiving Data ................................................................................................................................... 15
+
+Configure and receive single touch event .................................................................................................................. 15
+
+Configure and receive dual touch event ..................................................................................................................... 17
+
+Contact Information ........................................................................................................................................................ 18
+
+March 18, 2011 1
+
+zForceTM
+
+Communication Interface
+
+Purpose
+
+TM
+
+This document contains information controller. The controller March 18, 2011 to communicate with the Neonode with a host processor via an 2
+
+how zForceoptical touch screen
+
+communicates I2C hardware interface.
+
+zForceTM
+
+Communication Interface
+
+Hardware Interface Communication Control Signals
+
+Signal description
+
+The hardware interface consists of the following signals:
+
+These pins are part of the I2C communication interface.
+
+This pin is a master reset signal which will reset the Neonode controller when pulled low (Not to be used for
+
+enable/disable the circuit). Unless otherwise stated, leave unconnected.
+
+: This pin indicates when the controller has data to send.
+
+Bootloader Interface
+
+The bootloader interface is used to update the flash firmware on the zForce controller. By implementing this function it is possible to update the software from the host CPU. This interface requires 4 signals to operate properly. For more information about the bootloader interface, please see the following document "MSP430 Memory Programming User Guide" available at
+
+The normal operation and state of the RST/TEST pin is shown below as well the sequence to trigger the BSL function.
+
+March 18, 2011 3
+
+zForceTM
+
+Communication Interface
+
+Inter-Integrated Circuit (I2C) Communication
+
+I2C General description
+
+The I2C mode supports any slave or master I2C-compatible device. Each I2C device is recognized by a unique address
+
+and can operate as either a transmitter or a receiver. A device connected to the I2C bus can be considered as the
+
+master or the slave when performing data transfers. A master initiates a data transfer and generates the clock signal
+
+SCL. Any device addressed by a master is considered a slave. I2C data is communicated using the serial data pin (SDA)
+
+and the serial clock pin (SCL). Both SDA and SCL are bidirectional, and must be connected to a positive supply voltage
+
+using a pull-up resistor. NNXXX is the name of the Neonode controller. In order to support high speed clock
+
+frequency (100 kHz and above) it’s very important that the I2C supports . Maximum supported bus
+
+frequency is 400 kHz.
+
+I2C Serial data
+
+One clock pulse is generated by the master device for each data bit transferred. The I2C mode operates with byte
+
+data. Data is transferred most significant bit first as shown below. The first byte after a START condition consists of a
+
+7-bit slave address and the R/W bit. When R/W = 0, the master transmits data to a slave. When R/W = 1, the master
+
+receives data from a slave. The ACK bit is sent from the receiver after each byte on the 9th SCL clock.
+
+START and STOP conditions are generated by the master and are shown in above. A START condition is a high-to-low
+
+transition on the SDA line while SCL is high. A STOP condition is a low-to-high transition on the SDA line while SCL is
+
+high.. Data on SDA must be stable during the high period of SCL as shown in the figure below. The high and low state
+
+of SDA can only change when SCL is low, otherwise START or STOP conditions will be generated.
+
+March 18, 2011 4
+
+zForceTM
+
+Communication Interface
+
+I2C reading sequence
+
+To maximize performance and minimize the load on the I2C bus Neonode expects the host to read data in a certain
+
+sequence. Always read the 2 first bytes (which is a FrameStart and the number of bytes in the payload) in a 1 read,
+
+then read the remaining bytes in the next sequence. By doing that we ensure a stable and reliable communication.
+
+The I2C read sequence is specified below.
+
+
+I2C Addressing modes
+
+The I2C mode supports 7-bit and 10-bit addressing modes. In the 7-bit addressing format, shown below, the first byte is the 7-bit slave address and the R/W bit. The ACK bit is
+
+sent from the receiver after each byte.
+
+I2C Address
+
+The current I2C address is 0x50. Since Neonode use 7-bit addressing, the I2C address would binary as below
+
+8-bit Addresses Some vendors incorrectly provide 8-bit addresses which include the read/write bit. Often times, you can determine if
+
+this is the case because they will provide one address for writing to the slave device and another to reading from the
+
+slave.
+
+March 18, 2011 6
+
+zForceTM
+
+Communication Interface
+
+zForceTM
+
+Protocol Stack
+
+Neonode has developed a tiny and robust protocol stack that will run on a 16 bit microcontroller with at least 32 kb
+
+of memory.
+
+Embedded code
+
+In the microcontroller a real time sensitive application runs. The program scans the touch surface up to 100 times
+
+per second and support power saving modes to reduce power consumption.
+
+I2C communication protocol is used for sending and receiving data between the embedded code in the zForceTM
+
+microcontroller and the high level Operating Systems (OS) device driver. Further guidelines how to design high level
+
+OS driver can be found in chapter “Device driver guidelines”.
+
+Communication data format
+
+All data structures send and received by the zForce touch, larger than 1 byte (IE WORD, DWORD), is assume to be little endian, least significant byte first. For example, if we have a struct Resolution, struct Resolution { WORD width; WORD height; }; send or received, with the values width = 640 (0x0280) and height = 480 (0x01E0) the following send/receive order
+
+is used.
+
+Byte 1: 0x80
+
+Byte 2: 0x02
+
+Byte 3: 0xE0
+
+Byte 4: 0x01
+
+Version definition
+
+The components are used by convention as follows:
+
+? ?
+
+? ?
+
+Major: Assemblies with different major versions are not interchangeable. A higher version number might
+
+indicate a major rewrite of a product where backward compatibility cannot be assumed.
+
+Minor: If the major version number on two assemblies are the same, but the minor version number is
+
+different, this indicates significant enhancement with the intention of backward compatibility. This higher
+
+minor version number might indicate a point release of a product or a fully backward-compatible new version
+
+of a product.
+
+Build: A difference in build number represents a recompilation of the same source. Different build numbers
+
+might be used when the processor, platform, or compiler changes.
+
+Revision: Assemblies with the same major and minor version numbers but different revisions are intended to
+
+be fully interchangeable. A higher revision number might be used in a build that fixes a security hole in a
+
+previously released assembly.
+
+Sending commands to zForceTM
+
+To communicate and configure the zForceTM
+
+touch the following commands are used (see table 1.1).
+
+The command format for sending command is CommandID followed by, if any, command specific data.
+
+Receiving commands from zForceTM
+
+To communicate and receive information from the zForceTM
+
+touch the following commands are used (see table 1.2). Depending on which command has been sent to the controller, different data are received. However the structure is always the same, picture 1.2 shows what kind of information is included in the ReceiveData package.
+
+Picture 1.2 ReceiveData structure
+
+Initialization
+
+Before start requesting touch coordinates from the zForceTM
+
+touch make sure that the touch is ON and that the correct screen resolution is set. This is done by sending the Activate command and the SetResolution command with the corresponding resolution. To receive touch coordinates send the TouchDataRequest command. After sending the command the zForceTM
+
+touch
+
+will transmit the coordinates as soon as a touch has been registered.
+
+How to receive and extract the ReceiveData
+
+In order to safely receive and extract the data included in the ReceiveData package follow this procedure: 1. Read FrameStart byte (should be 0xEE)
+
+2. Read DataSize byte
+
+3. Extract the DATA payload, that has the size DataSize BYTES
+
+Extract data from the DATA payload
+
+The DATA payload contains packages of CommandID and CommandData (see picture 1.3), one DATA payload may consist of more than one CommandID and CommandData package. The size of CommandID and CommandData packages is equal to the DataSize that was obtained from the received data package.
+
+Communication Interface Touch Detection
+
+The zForceTM
+
+controller samples the touch screen up to 100 times per second, depending on the touch resolution. When an object is detected, it loads X and Y position data into the position registers and asserts the DataReady hardware signal. When that coordinate has been sent, the same procedure is repeated as long as the object position or state has changed. When the object is removed the controller will lower the sample rate to reduce power consumption. It will however
+
+resume the higher sample rate as soon as the object is present on the screen.
+
+Device Driver Guidelines
+
+All communication between the device driver and the zForceTM
+
+touch controller is done through I2C protocol,
+
+however zForceTM
+
+can also support communication with UART and SPI. The structure of all commands mentioned
+
+below can be found in previous chapter.
+
+Sending data
+
+In order to start requesting touch data from the zForceTM
+
+touch controller, it has to receive some initial commands. These commands are the Activate command and SetResolution command. Always wait for the corresponding response from one command before you send a new command. If customized features exists, such as special sweep/gestures, the SetConfiguration should be used to initialize those. The SetScanningFrequency command should be used to set the desired scanning frequency. If not initialized, a customer default scanning frequency is used. After setting the touch controller in the correct state with the initial commands, the device driver can start
+
+requesting touch information. In order to receive touch coordinates send the TouchDataRequest command. Note
+
+that the zForce will not produce new coordinate data until the object has changed position or state. If there is no
+
+object present when the zForce receives a TouchDataRequest, the host will receive a coordinate as soon as an
+
+object is present.
+
+Receiving data
+
+The general guideline is to always assume that any CommandID could be received at any time. Do not assume that a certain command will be returned before another command. Neonode recommend the use of a general function handling all received data and the appropriate actions to be taken from there. This is because there are commands that are trigger without a command request, like LowSignalAlert. If the host sends a SetResolution and expects a certain response (like ResolutionResponse) but instead receives a LowSignalAlert, the host and zForce might be out of sync if not handled properly. When the DataReady signal goes low (when using I2C communication), reading is allowed. Always read out the first 2 bytes (FrameStart and DataSize) and then read DataSize bytes and take action on the specific CommandID. The precise data structure can be found in the previous chapter “Receiving commands from zForceTM”. Some receive data just contain information that the device driver command has been confirmed. Others, such as TouchData, contain information that should be translated into events and sent to the high level OS. The exact design and structure of these events depends on which type of platform and OS the device uses. The next
+
+chapter “Example Sending/Receiving Data” describes the exact data structures that are communicated in different
+
+scenarios. Device driver sample code for Windows CE can be found in chapter “Device driver Win CE sample code”.
+
+Example Sending/Receiving Data
+
+Configure and receive single touch event
+-----------------------------------------
+
+1. Configure the zForce touch
+
+    Make sure the touch is power up, send the Activate command.
+
+    Send: 0x01
+    Response: 0xEE 0x02 0x01 0x00
+
+    0xEE - Indicates the start of the data package
+    0x02 - Size of the DATA payload in BYTES
+    0x01 - CommandID (See table 1.2)
+    0x00 - Command Data (See table 1.2)
+
+2. Configure the correct screen resolution, for example 640x480. Send the SetResolution command.
+
+    Send: 0x02 0x80 0x02 0xE0 0x01
+    Response: 0xEE 0x02 0x02 0x00
+
+    0xEE - Indicates the start of the data package
+    0x02 - Size of the DATA payload in BYTES
+    0x02 - CommandID (See table 1.2)
+    0x00 - Command Data (See table 1.2)
+
+3. Request touch coordinates, send the TouchDataRequest command.
+
+    Send: 0x04
+    Response: 0xEE 0x09 0x04 0x01 0x7B 0x00 0x31 0x01 0x04 0x00 0x64
+
+    0xEE - Indicates the start of the data package
+    0x09 - Size of the DATA payload in BYTES
+    0x04 - CommandID (See table 1.2)
+    0x01 - One Coordinate (See table 1.2)
+    0x7B - X coordinate (LSB)
+    0x00 - X coordinate (MSB)
+    0x31 - Y coordinate (LSB)
+    0x01 - Y coordinate (MSB)
+    0x04 - Coordinate 1 state, Id coordinate 1, 2 bit reserved
+    0x00 - 1 Byte reserved
+    0x64 - Coordinate 1 probability
+
+    The result of the touch request is that a object with the state down has occurred at the point X=123, Y=305.
+
+Configure and receive dual touch event
+-----------------------------------------
+
+1. Configure the zForce touch
+
+    Make sure the touch is power up, send the Activate command.
+
+    Send: 0x01
+    Response: 0xEE 0x02 0x01 0x00
+
+    0xEE - Indicates the start of the data package
+    0x02 - Size of the DATA payload in BYTES
+    0x01 - CommandID (See table 1.2)
+    0x00 - Command Data (See table 1.2)
+
+2. Configure the correct screen resolution, for example 640x480. Send the SetResolution command.
+
+    Send: 0x02 0x80 0x02 0xE0 0x01
+    Response: 0xEE 0x02 0x02 0x00
+
+    0xEE - Indicates the start of the data package
+    0x02 - Size of the DATA payload in BYTES
+    0x02 - CommandID (See table 1.2)
+    0x00 - Command Data (See table 1.2)
+
+3. Configure the device for dual touch events by using the SetConfiguration command
+
+    Send: 0x03 0x01 0x00 0x00 0x00
+    Response: 0xEE 0x02 0x03 0x00
+
+    0xEE - Indicates the start of the data package
+    0x02 - Size of the DATA payload in BYTES
+    0x03 - CommandID (See table 1.2)
+    0x00 - Command Data (See table 1.2)
+
+4. Request touch coordinates, send the TouchDataRequest command.
+
+    Send: 0x04
+    Response: 0xEE 0x0F 0x04 0x02 0x7B 0x00 0x31 0x01 0x04 0x00 0x64 0xC8 0x00 0xC8 0x00 0x48 0x00 0x64
+
+    0xEE - Indicates the start of the data package
+    0x0F - Size of the DATA payload in BYTES
+    0x04 - CommandID (See table 1.2)
+    0x02 - 2 Coordinates (See table 1.2)
+    0x7B - X1 coordinate (LSB) //First touch
+    0x00 - X1 coordinate (MSB)
+    0x31 - Y1 coordinate (LSB)
+    0x01 - Y1 coordinate (MSB)
+    0x04 - Coordinate 1 state, Id coordinate 1, 2 bit reserved
+    0x00 - 1 Byte reserved
+    0x64 - Coordinate 1 probability
+    0xC8 - X2 coordinate (LSB) //Second touch
+    0x00 - X2 coordinate (MSB)
+    0xC8 - Y2 coordinate (LSB)
+    0x00 - Y2 coordinate (MSB)
+    0x48 - Coordinate 2 state, Id coordinate 2, 2 bit reserved
+    0x00 - 1 Byte reserved
+    0x64 - Coordinate 2 probability
+
+The result of the touch request is two coordinates, coordinate 1 (123, 305) and coordinate 2 (200, 200).
+
+Contact Information
+-------------------
+
+Neonode Sweden Main Office Neonode Technologies AB Linnégatan 89 SE-115 12 Stockholm Sweden Tel: +46 8 667 17 17 info@neonode.com Neonode Korea Sales Office Neonode Technologies B-207, Metropalace2, 1145-1, Jung 1 Dong, Wonmigu, PucheonCity, Kyeonggido Korea Tel: +82 32 321 3877 sales@neonode.com Neonode Australia Sales Office Neonode Technologies PO Box 3248 Dural NSW 2158 Australia Tel: +61- 41 88 111 44 sales@neonode.com Neonode USA Sales Office
+
+Neonode Inc.
+
+651 Byrdee Way
+
+Lafayette CA 94549
+
+USA
+
+Tel: +1- 925 768 0620
+
+sales@neonode.com
+
