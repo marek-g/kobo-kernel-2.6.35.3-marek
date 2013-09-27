@@ -4264,7 +4264,7 @@ int __devinit mxc_epdc_fb_probe(struct platform_device *pdev)
 		giEPDC_MAX_NUM_UPDATES = 1;
 	}
 	else {
-		giEPDC_MAX_NUM_UPDATES = 10;
+		giEPDC_MAX_NUM_UPDATES = 1; //10;
 	}
 
 	fb_data = (struct mxc_epdc_fb_data *)framebuffer_alloc(
