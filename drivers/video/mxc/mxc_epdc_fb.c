@@ -3119,6 +3119,41 @@ static u16 calcBlockCRC16(struct mxc_epdc_fb_data *fb_data, u16 x, u16 y)
 	return res;
 }
 
+static void refresh_whole_screen(struct mxc_epdc_fb_data *fb_data)
+{
+	struct mxcfb_update_data update;
+	int x, y;
+	u16 *crcFB;
+
+	GALLEN_DBGLOCAL_BEGIN();
+
+	/* Do full screen update */
+	update.update_region.left = 0;
+	update.update_region.width = fb_data->epdc_fb_var.xres;
+	update.update_region.top = 0;
+	update.update_region.height = fb_data->epdc_fb_var.yres;
+	update.waveform_mode = WAVEFORM_MODE_AUTO;
+	update.update_mode = UPDATE_MODE_FULL;
+	update.update_marker = 0;
+	update.temp = TEMP_USE_AMBIENT;
+	update.flags = 0;
+
+	// update crc checksums
+	crcFB = &_blocksCRC16;
+	for (y = 0; y < fb_data->epdc_fb_var.yres; y += 8)
+	{
+		for (x = 0; x < fb_data->epdc_fb_var.xres; x += 16)
+		{
+			*crcFB++ = calcBlockCRC16(fb_data, x, y); 
+		}
+	}
+
+	// refresh screen
+	mxc_epdc_fb_send_update(&update, &fb_data->info);
+
+	GALLEN_DBGLOCAL_END();
+}
+
 static void mxc_epdc_fb_update_pages(struct mxc_epdc_fb_data *fb_data,
 				     u16 y1, u16 y2)
 {
@@ -3209,6 +3244,7 @@ static void mxc_epdc_fb_deferred_io(struct fb_info *info,
 	unsigned long beg, end;
 	int i, y1, y2, last_y1, last_y2;
 	int no_ranges;
+	int number_of_changed_lines;
 
 	if (fb_data->auto_mode != AUTO_UPDATE_MODE_AUTOMATIC_MODE)
 		return;
@@ -3257,6 +3293,45 @@ static void mxc_epdc_fb_deferred_io(struct fb_info *info,
 	if (no_ranges > 1)
 	{
 		sort(_line_ranges, no_ranges, sizeof(int)*2, line_ranges_cmp, NULL);
+	}
+	
+	// calculate number of changed lines
+	number_of_changed_lines = 0;
+	for (i = 0; i < no_ranges; i++)
+	{
+		y1 = _line_ranges[i*2 + 0];
+		y2 = _line_ranges[i*2 + 1];
+
+		if (i == 0)
+		{
+			last_y1 = y1;
+			last_y2 = y2;
+		}
+
+		if (y1 > last_y2 + 1)
+		{
+			number_of_changed_lines += (last_y2 - last_y1 + 1);
+
+			last_y1 = y1;
+			last_y2 = y2;
+		}
+		else
+		{
+			if (y2 > last_y2)
+			{
+				last_y2 = y2;
+			}
+		}
+	}
+	if (no_ranges > 0)
+	{
+		number_of_changed_lines += (last_y2 - last_y1 + 1);
+	}
+	
+	// if too many lines were changed - refresh whole screen
+	if (number_of_changed_lines > (fb_data->native_height *3) / 4) {
+		refresh_whole_screen(fb_data);
+		return;
 	}
 
 	// merge & update ranges
