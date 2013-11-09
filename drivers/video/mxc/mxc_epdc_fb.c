@@ -3139,7 +3139,7 @@ static void refresh_whole_screen(struct mxc_epdc_fb_data *fb_data)
 	update.flags = 0;
 
 	// update crc checksums
-	crcFB = &_blocksCRC16;
+	crcFB = _blocksCRC16;
 	for (y = 0; y < fb_data->epdc_fb_var.yres; y += 8)
 	{
 		for (x = 0; x < fb_data->epdc_fb_var.xres; x += 16)
